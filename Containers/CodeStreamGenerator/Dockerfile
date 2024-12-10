@@ -4,4 +4,6 @@ RUN mkdir /QualitasCorpus
 VOLUME /QualitasCorpus
 WORKDIR /Scripts
 COPY . .
+
+RUN chmod +x generate-code-stream.sh
 ENTRYPOINT ["./generate-code-stream.sh"]

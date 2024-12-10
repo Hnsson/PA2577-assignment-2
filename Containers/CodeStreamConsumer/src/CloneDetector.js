@@ -81,9 +81,9 @@ class CloneDetector {
 
     #filterCloneCandidates(file, compareFile) {
         // TODO
-        // For each chunk in file.chunks, find all #chunkMatch() in compareFile.chunks
-        // For each matching chunk, create a new Clone.
-        // Store the resulting (flat) array in file.instances.
+        // [X] - For each chunk in file.chunks, find all #chunkMatch() in compareFile.chunks
+        // [X] - For each matching chunk, create a new Clone.
+        // [X] - Store the resulting (flat) array in file.instances.
         // 
         // TIP 1: Array.filter to find a set of matches, Array.map to return a new array with modified objects.
         // TIP 2: You can daisy-chain calls to filter().map().filter().flat() etc.
@@ -92,15 +92,20 @@ class CloneDetector {
         // Return: file, including file.instances which is an array of Clone objects (or an empty array).
         //
 
-        file.instances = file.instances || [];        
-        file.instances = file.instances.concat(newInstances);
+        file.instances = file.instances || [];
+        const newInstances = file.chunks.flatMap(chunk =>
+            compareFile.chunks
+                .filter(otherChunk => this.#chunkMatch(chunk, otherChunk)) // Match chunks
+                .map(matchedChunk => new Clone(file.name, compareFile.name, chunk, matchedChunk)) // Create Clones
+        );
+        file.instances.push(...newInstances);
         return file;
     }
      
     #expandCloneCandidates(file) {
         // TODO
-        // For each Clone in file.instances, try to expand it with every other Clone
-        // (using Clone::maybeExpandWith(), which returns true if it could expand)
+        // [X] - For each Clone in file.instances, try to expand it with every other Clone
+        //       (using Clone::maybeExpandWith(), which returns true if it could expand)
         // 
         // Comment: This should be doable with a reduce:
         //          For every new element, check if it overlaps any element in the accumulator.
@@ -112,14 +117,20 @@ class CloneDetector {
         //         and not any of the Clones used during that expansion.
         //
 
+        file.instances = file.instances || [];
+        file.instances = file.instances.reduce((acc, current) => {
+            const existing = acc.find(clone => clone.maybeExpandWith(current)); // Try to expand
+            if (!existing) acc.push(current); // If not expandable, add as new
+            return acc;
+        }, []);
         return file;
     }
     
     #consolidateClones(file) {
         // TODO
-        // For each clone, accumulate it into an array if it is new
-        // If it isn't new, update the existing clone to include this one too
-        // using Clone::addTarget()
+        // [X] - For each clone, accumulate it into an array if it is new
+        // [X] - If it isn't new, update the existing clone to include this one too
+        //       using Clone::addTarget()
         // 
         // TIP 1: Array.reduce() with an empty array as start value.
         //        Push not-seen-before clones into the accumulator
@@ -129,6 +140,13 @@ class CloneDetector {
         // Return: file, with file.instances containing unique Clone objects that may contain several targets
         //
 
+        file.instances = file.instances || [];
+        file.instances = file.instances.reduce((acc, clone) => {
+            const existing = acc.find(existingClone => existingClone.equals(clone)); // Check if already exists
+            if (existing) existing.addTarget(clone); // Merge targets
+            else acc.push(clone); // Add new clone
+            return acc;
+        }, []);
         return file;
     }
     
@@ -172,7 +190,7 @@ class CloneDetector {
             //
             file = this.#filterCloneCandidates(file, f); 
             file = this.#expandCloneCandidates(file);
-            file = this.#consolidateClones(file); 
+            file = this.#consolidateClones(file);
         }
 
         return file;

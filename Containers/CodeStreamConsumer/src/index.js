@@ -2,6 +2,7 @@ const express = require('express');
 const formidable = require('formidable');
 const fs = require('fs/promises');
 const app = express();
+const path = require('path');
 const PORT = 3000;
 
 const Timer = require('./Timer');
@@ -9,6 +10,9 @@ const CloneDetector = require('./CloneDetector');
 const CloneStorage = require('./CloneStorage');
 const FileStorage = require('./FileStorage');
 
+app.set('views', path.join(__dirname, 'views'));
+console.log(path.join(__dirname, 'views'))
+app.set('view engine', 'ejs');
 
 // Express and Formidable stuff to receice a file for further processing
 // --------------------
@@ -17,13 +21,53 @@ const form = formidable({multiples:false});
 app.post('/', fileReceiver );
 function fileReceiver(req, res, next) {
     form.parse(req, (err, fields, files) => {
-        fs.readFile(files.data.filepath, { encoding: 'utf8' })
+        fs.readFile(files.data?.filepath, { encoding: 'utf8' })
             .then( data => { return processFile(fields.name, data); });
     });
     return res.end('');
 }
 
 app.get('/', viewClones );
+
+app.get('/info', (req, res, next) => {
+    res.json({ total_files_processed: TimerStatistics.total_files_processed, clones_found: TimerStatistics.clones_found });
+});
+
+app.get('/average/:last', (req, res, next) => {
+    const stats = TimerStatistics.calculateAverage();
+    const n_files = TimerStatistics.total_files_processed;
+
+    const selected_stats = req.params.last === '100' ? stats.last100 : req.params.last === '1000' ? stats.last1000 : stats.overall;
+    const selectedStatsWithStrings = {
+        total: selected_stats.total.toString(),
+        match: selected_stats.match.toString()
+    };
+
+    res.json({
+        x: n_files.toString(),
+        y: selectedStatsWithStrings
+    });
+});
+
+app.get('/timers', (req, res, next) => {
+    const data = {
+        files: TimerStatistics.timers.map(file => {
+            return {
+                "file name": file.name,
+                "total (µs)": file.total.toString(),
+                "match (µs)": file.match.toString(),
+                "line count": file.line
+            };
+        }),
+        total: TimerStatistics.overallTotal.toString(),
+        match: TimerStatistics.overallMatch.toString(),
+    };
+
+    res.json(data);
+});
+
+
+
 
 const server = app.listen(PORT, () => { console.log('Listening for files on port', PORT); });
 
@@ -107,6 +151,69 @@ const STATS_FREQ = 100;
 const URL = process.env.URL || 'http://localhost:8080/';
 var lastFile = null;
 
+const TimerStatistics = {
+    timers: [],
+    total_files: 0,
+    total_files_processed: 0,
+    clones_found: 0,
+
+    overallTotal: 0n,
+    overallMatch: 0n,
+    addTimer: function(file) {
+        const newTimer = {
+            name: file.name,
+            total: file.timers.total / 1_000n || 0n,
+            match: file.timers.match / 1_000n || 0n,
+            line: file.contents.split("\n").length
+        };
+        this.timers.push(newTimer);
+
+        // Update overall totals
+        this.overallTotal += newTimer.total;
+        this.overallMatch += newTimer.match;
+
+        if (this.timers.length > 1000) {
+            const oldestTimer = this.timers.shift(); // Remove the oldest timer
+            // Subtract from overall
+            this.overallTotal -= oldestTimer.total;
+            this.overallMatch -= oldestTimer.match;
+        }
+    },
+    calculateAverage: function() {
+        const last100 = this.timers.slice(-100);
+        const last1000 = this.timers.slice(-1000);
+
+        const average = (data, key) => {
+            return data.reduce((sum, item) => sum + (BigInt(item[key]) || 0n), 0n) / BigInt(data.length || 1);
+        }
+
+        return {
+            overall: {
+                total: this.overallTotal / BigInt(this.total_files_processed || 1),
+                match: this.overallMatch / BigInt(this.total_files_processed || 1)
+            },
+            last100: {
+                total: average(last100, 'total'),
+                match: average(last100, 'match')
+            },
+            last1000: {
+                total: average(last1000, 'total'),
+                match: average(last1000, 'match')
+            }
+        };
+    },
+    sumTotals: function() {
+        const sum = (key) => {
+            return this.timers.reduce((total, timer) => total + (BigInt(timer[key]) || 0n), 0n);
+        }
+
+        return {
+            total: sum('total'),
+            match: sum('match')
+        };
+    }
+};
+
 function maybePrintStatistics(file, cloneDetector, cloneStore) {
     if (0 == cloneDetector.numberOfProcessedFiles % STATS_FREQ) {
         console.log('Processed', cloneDetector.numberOfProcessedFiles, 'files and found', cloneStore.numberOfClones, 'clones.');
@@ -142,7 +249,10 @@ function processFile(filename, contents) {
         .then( (file) => cd.storeFile(file) )
         .then( (file) => Timer.endTimer(file, 'total') )
         .then( PASS( (file) => lastFile = file ))
-        .then( PASS( (file) => maybePrintStatistics(file, cd, cloneStore) ))
+        .then( (file) => TimerStatistics.addTimer(file) )
+        .then( () => TimerStatistics.total_files_processed = cd.numberOfProcessedFiles )
+        .then( () => TimerStatistics.clones_found = cloneStore.numberOfClones )
+        // .then( PASS( (file) => maybePrintStatistics(file, cd, cloneStore) ))
     // TODO Store the timers from every file (or every 10th file), create a new landing page /timers
     // and display more in depth statistics there. Examples include:
     // average times per file, average times per last 100 files, last 1000 files.

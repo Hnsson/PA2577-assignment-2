@@ -20,6 +20,13 @@ services:
       - ./Containers/CodeStreamConsumer/src:/app/src
     ports:
       - 8080:3000
+  statistics-interface:
+    build:
+      context: ./Containers/StatisticsInterface
+    environment:
+      TARGET: "cs-consumer:3000"
+    ports:
+      - 8501:8501
 volumes:
   qc-volume:
     external: true
