@@ -60,16 +60,17 @@ def fetch_and_update_table():
 
 
 st.write(":gray[Fetching data every 5 seconds...]")
-placeholder = st.empty()  # Placeholder for the chart
+placeholder = st.empty()
 placeholder_info = st.empty()
 placeholder_table = st.empty()
 
 while True:
     with placeholder_info.container():
-        fetch_and_display_info()  # Fetch and display the table
+        fetch_and_display_info()
 
-    fetch_and_update_data()  # Fetch and update the data
+    fetch_and_update_data()
     with placeholder.container():
+        st.subheader("Graph of average total time / number of processed files")
         st.line_chart(
             st.session_state.chart_data.set_index("x"),
             use_container_width=True

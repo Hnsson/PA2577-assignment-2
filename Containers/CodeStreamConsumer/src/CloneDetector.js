@@ -119,7 +119,7 @@ class CloneDetector {
 
         file.instances = file.instances || [];
         file.instances = file.instances.reduce((acc, current) => {
-            const existing = acc.find(clone => clone.maybeExpandWith(current)); // Try to expand
+            const existing = acc.find(clone => clone.maybeExpandWith(current));
             if (!existing) acc.push(current); // If not expandable, add as new
             return acc;
         }, []);
@@ -142,7 +142,7 @@ class CloneDetector {
 
         file.instances = file.instances || [];
         file.instances = file.instances.reduce((acc, clone) => {
-            const existing = acc.find(existingClone => existingClone.equals(clone)); // Check if already exists
+            const existing = acc.find(existingClone => existingClone.equals(clone));
             if (existing) existing.addTarget(clone); // Merge targets
             else acc.push(clone); // Add new clone
             return acc;

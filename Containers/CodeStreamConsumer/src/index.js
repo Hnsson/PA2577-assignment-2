@@ -173,10 +173,7 @@ const TimerStatistics = {
         this.overallMatch += newTimer.match;
 
         if (this.timers.length > 1000) {
-            const oldestTimer = this.timers.shift(); // Remove the oldest timer
-            // Subtract from overall
-            this.overallTotal -= oldestTimer.total;
-            this.overallMatch -= oldestTimer.match;
+            this.timers.shift(); // Remove the oldest timer
         }
     },
     calculateAverage: function() {
