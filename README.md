@@ -1,5 +1,5 @@
 # PA2577-assignment-2
-I have added a new service, a Streamlit Python application, under `Containers/StatisticsInterface/`. The service has also been included in the [stream-of-code.yaml](stream-of-code.yaml) file with the following configuration:
+We have added a new service, a Streamlit Python application, under `Containers/StatisticsInterface/`. The service has also been included in the [stream-of-code.yaml](stream-of-code.yaml) file with the following configuration:
 ```yaml
 statistics-interface:
   build:
