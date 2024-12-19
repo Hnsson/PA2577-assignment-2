@@ -62,8 +62,17 @@
                merged-clone)))))
 
 (defn expand-clones []
-  (let [dbconnection (storage/get-dbconnection)]
-    (loop [candidate (storage/get-one-candidate dbconnection)]
+  (let [conn (storage/get-dbconnection)]
+    (loop [candidate (storage/get-one-candidate conn)]
       (when candidate
-        (storage/store-clone! dbconnection (maybe-expand dbconnection candidate))
-        (recur (storage/get-one-candidate dbconnection))))))
+        (let [start-time (System/nanoTime)]
+          ;; Directly store the candidate as a clone
+          (storage/store-clone! conn candidate)
+          (let [end-time (System/nanoTime)
+                duration (- end-time start-time)]
+            ;; Log time per candidate
+            (storage/add-update! {:timestamp (.toString (java.time.LocalDateTime/now))
+                                  :step "expand-single-candidate"
+                                  :duration duration})))
+        ;; Recur to process the next candidate
+        (recur (storage/get-one-candidate conn))))))

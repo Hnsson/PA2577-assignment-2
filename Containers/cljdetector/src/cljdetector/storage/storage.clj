@@ -8,13 +8,21 @@
 (def dbname "cloneDetector")
 (def partition-size 100)
 (def hostname (or (System/getenv "DBHOST") DEFAULT-DBHOST))
-(def collnames ["files"  "chunks" "candidates" "clones"])
+(def collnames ["files"  "chunks" "candidates" "clones", "statusUpdates"])
+(defonce conn (mg/connect {:host hostname})) ;; Shared connection for the entire application
+(defonce db (mg/get-db conn dbname))
+
+
 
 (defn print-statistics []
   (let [conn (mg/connect {:host hostname})        
         db (mg/get-db conn dbname)]
     (doseq [coll collnames]
       (println "db contains" (mc/count db coll) coll))))
+
+(defn add-update! [update]
+  (let [collname "statusUpdates"]
+    (mc/insert db collname update)))
 
 (defn clear-db! []
   (let [conn (mg/connect {:host hostname})        
@@ -53,17 +61,24 @@
       (mc/insert-batch db collname (map identity clone-group)))))
 
 (defn identify-candidates! []
-  (let [conn (mg/connect {:host hostname})        
+  (let [start-time (System/nanoTime) ;; Start timer
+        conn (mg/connect {:host hostname})
         db (mg/get-db conn dbname)
         collname "chunks"]
-     (mc/aggregate db collname
-                   [{$group {:_id {:chunkHash "$chunkHash"}
-                             :numberOfInstances {$count {}}
-                             :instances {$push {:fileName "$fileName"
-                                                :startLine "$startLine"
-                                                :endLine "$endLine"}}}}
-                    {$match {:numberOfInstances {$gt 1}}}
-                    {"$out" "candidates"} ])))
+    (mc/aggregate db collname
+                  [{$group {:_id {:chunkHash "$chunkHash"}
+                            :numberOfInstances {$count {}}
+                            :instances {$push {:fileName "$fileName"
+                                               :startLine "$startLine"
+                                               :endLine "$endLine"}}}}
+                   {$match {:numberOfInstances {$gt 1}}}
+                   {"$out" "candidates"}])
+    (let [end-time (System/nanoTime)
+          duration (- end-time start-time)]
+      (add-update! {:timestamp (.toString (java.time.LocalDateTime/now))
+                            :step "identify-candidates"
+                            :duration duration}))))
+
 
 
 (defn consolidate-clones-and-source []

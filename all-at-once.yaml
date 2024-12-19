@@ -4,6 +4,8 @@ version: "3.8"
 services:
   clone-detector:
     image: cljdetector
+    depends_on:
+      - dbstorage
     command: clear 
     ports:
       - 8080:3000
@@ -28,7 +30,20 @@ services:
     volumes:
       - dbstorage:/data/db
       - dbconfig:/data/configdb
-    
+
+  # monitor-tool:
+  #   image: monitortool
+  #   depends_on:
+  #     - dbstorage
+  #   environment:
+  #     DBHOST: dbstorage
+  monitor-tool:
+    build:
+      context: ./Containers/MonitorTool
+    environment:
+      DBHOST: dbstorage
+    ports:
+      - 8501:8501
 volumes:
   dbstorage:
   dbconfig:

@@ -9,7 +9,11 @@
 (def source-type #".*\.java")
 
 (defn ts-println [& args]
-  (println (.toString (java.time.LocalDateTime/now)) args))
+  (let [timestamp (.toString (java.time.LocalDateTime/now))]
+    (println args)
+    ;; Log the message to the database
+    (storage/add-update! {:timestamp timestamp :message (string/join " " args)})))
+
 
 (defn maybe-clear-db [args]
   (when (some #{"CLEAR"} (map string/upper-case args))
@@ -18,23 +22,35 @@
 
 (defn maybe-read-files [args]
   (when-not (some #{"NOREAD"} (map string/upper-case args))
-    (ts-println "Reading and Processing files...")
-    (let [chunk-param (System/getenv "CHUNKSIZE")
-          chunk-size (if chunk-param (Integer/parseInt chunk-param) DEFAULT-CHUNKSIZE)
-          file-handles (source-processor/traverse-directory source-dir source-type)
-          chunks (source-processor/chunkify chunk-size file-handles)]
-      (ts-println "Storing files...")
-      (storage/store-files! file-handles)
-      (ts-println "Storing chunks of size" chunk-size "...")
-      (storage/store-chunks! chunks))))
+    (let [start-time (System/nanoTime)]
+      (ts-println "Reading and Processing files...")
+      (let [chunk-param (System/getenv "CHUNKSIZE")
+            chunk-size (if chunk-param (Integer/parseInt chunk-param) DEFAULT-CHUNKSIZE)
+            file-handles (source-processor/traverse-directory source-dir source-type)
+            chunks (source-processor/chunkify chunk-size file-handles)]
+        (ts-println "Storing files...")
+        (storage/store-files! file-handles)
+        (ts-println "Storing chunks of size" chunk-size "...")
+        (storage/store-chunks! chunks))
+      (let [end-time (System/nanoTime)
+            duration (- end-time start-time)]
+        (storage/add-update! {:timestamp (.toString (java.time.LocalDateTime/now))
+                              :step "total-file-processing-time"
+                              :duration duration})))))
 
 (defn maybe-detect-clones [args]
   (when-not (some #{"NOCLONEID"} (map string/upper-case args))
-    (ts-println "Identifying Clone Candidates...")
-    (storage/identify-candidates!)
-    (ts-println "Found" (storage/count-items "candidates") "candidates")
-    (ts-println "Expanding Candidates...")
-    (expander/expand-clones)))
+    ;; Clone detection (identify-candidates)
+    (let [start-time (System/nanoTime)]
+      (ts-println "Identifying Clone Candidates...")
+      (storage/identify-candidates!)
+      (ts-println "Expanding Candidates...")
+      (expander/expand-clones)
+      (let [end-time (System/nanoTime)
+            duration (- end-time start-time)]
+        (storage/add-update! {:timestamp (.toString (java.time.LocalDateTime/now))
+                              :step "total-match-time"
+                              :duration duration})))))
 
 (defn pretty-print [clones]
   (doseq [clone clones]
