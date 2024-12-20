@@ -3,7 +3,7 @@ import os
 import pandas as pd
 import time
 from datetime import datetime
-from pymongo import MongoClient
+from pymongo import MongoClient, ASCENDING, DESCENDING
 
 # MongoDB connection settings
 DB_HOST = "dbstorage"
@@ -19,49 +19,108 @@ def connect_to_db():
 db = connect_to_db()
 
 # Helper functions
-def get_step_data(step_name):
-    """Fetch all records where step matches the given name."""
-    return list(db[STATUS_UPDATES].find({"step": step_name}))
+def get_processing_time(step_name):
+    record = db[STATUS_UPDATES].find_one({"step": step_name})
+    return record["duration"] if record else 0
 
-def get_timers_data(limit = None, reverse = False):
-    """Fetch and format timing data for display in a table."""
-    sort_order = -1 if reverse else 1
-    raw_data = db[STATUS_UPDATES].find({"step": {"$in": ["chunkify-file", "expand-single-candidate"]}}).sort("timestamp", sort_order)
+def get_collection_count(collection_name):
+    return db[collection_name].count_documents({})
 
-    if limit:
-        raw_data = raw_data.limit(limit)
-    formatted_data = []
+def get_latest_documents(limit=100):
+    return list(db[STATUS_UPDATES].find().sort("timestamp", DESCENDING).limit(limit))
 
-    for record in raw_data:
-        # Extract and truncate the timestamp to microseconds
-        raw_timestamp = record.get("timestamp", "")
-        try:
-            # Truncate nanoseconds to microseconds if present
-            formatted_timestamp = datetime.fromisoformat(raw_timestamp[:26]).strftime(f"%Y-%m-%d %H:%M:%S.{int(raw_timestamp[20:23])}")
-        except ValueError:
-            formatted_timestamp = "Invalid Timestamp"
+def get_table_data():
+    data = [
+        {
+            "Processing Step": "Reading and Processing Files",
+            "Collection Count": "",
+            "Processing Time": get_processing_time("total-file-processing-time"),
+        },
+        {
+            "Processing Step": "Storing Files",
+            "Collection Count": get_collection_count("files"),
+            "Processing Time": get_processing_time("storing-files"),
+        },
+        {
+            "Processing Step": "Storing Chunks",
+            "Collection Count": get_collection_count("chunks"),
+            "Processing Time": get_processing_time("storing-chunks"),
+        },
+        {
+            "Processing Step": "Identifying Clone Candidates",
+            "Collection Count": get_collection_count("candidates"),
+            "Processing Time": get_processing_time("identifying-clone-candidates"),
+        },
+        {
+            "Processing Step": "Expanding Candidate (clone count)",
+            "Collection Count": get_collection_count("clones"),
+            "Processing Time": get_processing_time("expanding-candidates"),
+        },
+    ]
 
-        # Extract and format other fields
-        formatted_data.append({
-            "File Name": os.path.basename(record.get("fileName", "")),
-            "Timestamp": formatted_timestamp,
-            "Step": record.get("step", ""),
-            "Duration (µs)": round(record.get("duration", 0) / 1000, 2),
-            "Time per Chunk (µs)": round(record.get("time-per-chunk", 0) / 1000, 2),
-            "No. chunks": record.get("chunks-count", 0),
-        })
+    table_data = [
+        [item["Processing Step"], item["Collection Count"], item["Processing Time"]]
+        for item in data
+    ]
+    return table_data
 
-    return formatted_data
+def get_timers_data():
+    """Fetch and format timing data for display in a scatter graph."""
+    BATCH_SIZE = 1000
+
+    # Initialize session state if not already done
+    if "pd_data" not in st.session_state:
+        st.session_state["pd_data"] = pd.DataFrame(columns=["timestamp", "duration"])
+        st.session_state["last_timestamp"] = None
+
+    # Build the query based on the last fetched timestamp
+    match_query = {"step": {"$in": ["chunkify-file", "expand-single-candidate"]}}
+    if st.session_state["last_timestamp"] is not None:
+        match_query["timestamp"] = {"$gt": st.session_state["last_timestamp"]}
+
+    pipeline = [
+        {"$match": match_query},
+        {"$sort": {"timestamp": ASCENDING}},  # Sort by timestamp
+    ]
+
+    # Perform aggregation or find query
+    new_data = list(db[STATUS_UPDATES].aggregate(pipeline))
+
+    # If new data is found, process it
+    if new_data:
+        # Convert to DataFrame
+        new_df = pd.DataFrame(new_data)
+
+        # Update session_state["pd_data"]
+        st.session_state["pd_data"] = pd.concat([st.session_state["pd_data"], new_df], ignore_index=True)
+
+        # Update last fetched timestamp to the last document's timestamp
+        st.session_state["last_timestamp"] = new_df["timestamp"].iloc[-1]
+
+    # Aggregate data in batches of size BATCH_SIZE
+    data = st.session_state["pd_data"]
+    data["batch"] = data.index // BATCH_SIZE
+
+    aggregated = data.groupby("batch").agg(
+        timestamp=("timestamp", "first"),  # First timestamp in the batch
+        average_duration=("duration", "mean")  # Average duration in the batch
+    )
+
+    # Return data for scatter plot
+    scatter_data = [{"x": row["timestamp"], "y": row["average_duration"]} for _, row in aggregated.iterrows()]
+    return scatter_data
 
 def get_info_data():
     """Fetch summary statistics."""
     total_files_processed = db["files"].count_documents({})
     total_clones_found = db["clones"].count_documents({})
-    total_files_chunkified = db["statusUpdates"].count_documents({"step": "chunkify-file"})
+    total_chunks = db["chunks"].count_documents({})
+    total_candidates = db["candidates"].count_documents({})
     return {
         "total_files_processed": total_files_processed,
-        "total_files_chunkified": total_files_chunkified,
-        "clones_found": total_clones_found,
+        "total_chunks": total_chunks,
+        "total_candidates": total_candidates,
+        "total_clones": total_clones_found,
     }
 
 # Initialize Streamlit app
@@ -81,68 +140,78 @@ def fetch_and_update_data():
 
     if data:
         # Convert the data to a DataFrame
-        df = pd.DataFrame(data)
+        df = pd.DataFrame(data, columns=["x", "y"])
+        
 
-        # Prepare data for the scatter plot
-        chart_data = pd.DataFrame({
-            "Index": range(1, len(df) + 1),  # Use index + 1 as the x-value
-            "Duration (µs)": df["Duration (µs)"]  # Use the duration as the y-value
-        })
-
-        # Create the scatter plot
-        st.scatter_chart(chart_data.set_index("Index"), x_label="represent no. operations", y_label="represent time (µs)", use_container_width=True)
+        df["x"] = pd.to_datetime(df["x"])  # Ensure it's a datetime object
+        df.set_index("x", inplace=True)
+ 
+        # st.write(df)
+        # # Create the scatter plot
+        st.scatter_chart(df, x_label="represent time of operation (12-hour clock)", y_label="represent time (nano seconds)", use_container_width=True)
 
 def fetch_and_display_info():
     data = get_info_data()
 
     if data:
-        st.subheader("File Statistics")
+        st.subheader("Database Statistics")
         
-        clones_difference = data["clones_found"] - st.session_state.last_clones_found
+        clones_difference = data["total_clones"] - st.session_state.last_clones_found
 
-        col1, col2= st.columns(2)
-        col1.metric("Number of files processed", data["total_files_processed"])
-        col2.metric(label="Number of files chunkified", value=f"{data['total_files_chunkified']}/{data['total_files_processed']}")
-        # col3.metric("Number of clones found", data["clones_found"], clones_difference)
+        st.metric(label="Number of files processed", value=data["total_files_processed"])
+        st.metric(label="Number of chunks", value=data["total_chunks"])
+        st.metric(label="Number of candidates", value=data["total_candidates"])
+        st.metric(label="Number of clones", value=data["total_clones"], delta=clones_difference)
 
-        st.session_state.last_clones_found = data["clones_found"]
+        st.session_state.last_clones_found = data["total_clones"]
 
 def fetch_and_update_table():
-    data = get_timers_data(limit=100, reverse=True)
+    table_data = get_table_data()
+    st.subheader("Processing Steps")
+    st.dataframe({
+        "Processing Step": [row[0] for row in table_data],
+        "Collection Count": [row[1] for row in table_data],
+        "Processing Time (minutes)": [
+            round(float(row[2]) / 1e9 / 60, 2) if row[2] not in (None, "") else None for row in table_data
+        ],
+    })
 
-    if data:
-        st.subheader("Timer Statistics")
-        st.write("Time taken for the last 100 recent operations:")
-        df = pd.DataFrame(data)
-
-        st.dataframe(data=df, use_container_width=True)
+def fetch_and_update_latest_doc():
+    latest_docs = get_latest_documents(limit=100)
+    processed_docs = [
+        {
+            key: (
+                os.path.basename(value) if key == "fileName" else
+                # For timestamp, include milliseconds
+                datetime.strptime(value.split(".")[0], "%Y-%m-%dT%H:%M:%S").strftime("%H:%M:%S") + "." + value.split(".")[1][:3]
+                if key == "timestamp" and isinstance(value, str) else
+                value
+            )
+            for key, value in doc.items() if key != "_id"
+        }
+        for doc in latest_docs
+    ]
+    st.dataframe(processed_docs)
 
 # Real-time fetching
 st.write("Fetching data every 5 seconds...")
 placeholder = st.empty()
-placeholder_info = st.empty()
 placeholder_table = st.empty()
+placeholder_latest_doc = st.empty()
 
 while True:
-    # Update metrics
-    with placeholder_info.container():
-        fetch_and_display_info()
-
     # Update graph
     with placeholder.container():
         st.subheader("Graph of Operation Timings")
         fetch_and_update_data()
-        # st.scatter_chart(
-        #     st.session_state.chart_data.set_index("x"),
-        #     use_container_width=True
-        # )
-        # st.markdown("<style>.big-font {font-size: 12px; color: gray; margin: 0;}</style>", unsafe_allow_html=True)
-        # st.markdown("<p class='big-font'><b>X-values</b> represent the number of operations performed.</p>", unsafe_allow_html=True)
-        # st.markdown("<p class='big-font'><b>Y-values</b> represent time in milliseconds.</p>", unsafe_allow_html=True)
-        # st.divider()
 
     # Update table
     with placeholder_table.container():
         fetch_and_update_table()
+    
+    # Update table
+    with placeholder_latest_doc.container():
+        st.subheader("Last 100 Operations")
+        fetch_and_update_latest_doc()
 
     time.sleep(5)  # Wait for 5 seconds before fetching again

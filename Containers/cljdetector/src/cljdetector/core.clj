@@ -30,8 +30,19 @@
             chunks (source-processor/chunkify chunk-size file-handles)]
         (ts-println "Storing files...")
         (storage/store-files! file-handles)
+        (let [end-time (System/nanoTime)
+              duration (- end-time start-time)]
+          (storage/add-update! {:timestamp (.toString (java.time.LocalDateTime/now))
+                                :step "storing-files"
+                                :duration duration}))
         (ts-println "Storing chunks of size" chunk-size "...")
-        (storage/store-chunks! chunks))
+        (let [start-time-2 (System/nanoTime)]
+          (storage/store-chunks! chunks)
+          (let [end-time-2 (System/nanoTime)
+                duration-2 (- end-time-2 start-time-2)]
+            (storage/add-update! {:timestamp (.toString (java.time.LocalDateTime/now))
+                                  :step "storing-chunks"
+                                  :duration duration-2}))))
       (let [end-time (System/nanoTime)
             duration (- end-time start-time)]
         (storage/add-update! {:timestamp (.toString (java.time.LocalDateTime/now))

@@ -72,7 +72,7 @@
                                   :duration duration
                                   :fileName fileName
                                   :chunks-count chunks-count
-                                  :time-per-chunk (/ duration (max 1 chunks-count))}) ;; Avoid division by zero
+                                  :time-per-chunk (/ duration (max 1 chunks-count))})
             chunks)))
       (catch Exception e
         (println "Error processing file:" (.getPath file) (.getMessage e))

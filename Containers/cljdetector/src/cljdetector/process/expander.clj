@@ -67,7 +67,7 @@
       (when candidate
         (let [start-time (System/nanoTime)]
           ;; Directly store the candidate as a clone
-          (storage/store-clone! conn candidate)
+          (storage/store-clone! conn (maybe-expand conn candidate))
           (let [end-time (System/nanoTime)
                 duration (- end-time start-time)]
             ;; Log time per candidate
