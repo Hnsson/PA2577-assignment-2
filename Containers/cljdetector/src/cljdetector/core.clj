@@ -52,15 +52,15 @@
 (defn maybe-detect-clones [args]
   (when-not (some #{"NOCLONEID"} (map string/upper-case args))
     ;; Clone detection (identify-candidates)
-    (let [start-time (System/nanoTime)]
       (ts-println "Identifying Clone Candidates...")
       (storage/identify-candidates!)
+    (let [start-time (System/nanoTime)]
       (ts-println "Expanding Candidates...")
       (expander/expand-clones)
       (let [end-time (System/nanoTime)
             duration (- end-time start-time)]
         (storage/add-update! {:timestamp (.toString (java.time.LocalDateTime/now))
-                              :step "total-match-time"
+                              :step "expanding-candidates"
                               :duration duration})))))
 
 (defn pretty-print [clones]

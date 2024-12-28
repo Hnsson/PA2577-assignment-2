@@ -33,23 +33,23 @@ def get_table_data():
     data = [
         {
             "Processing Step": "Reading and Processing Files",
-            "Collection Count": "",
+            "Collection Count": 0,
             "Processing Time": get_processing_time("total-file-processing-time"),
         },
         {
-            "Processing Step": "Storing Files",
+            "Processing Step": "- Storing Files",
             "Collection Count": get_collection_count("files"),
             "Processing Time": get_processing_time("storing-files"),
         },
         {
-            "Processing Step": "Storing Chunks",
+            "Processing Step": "- Storing Chunks",
             "Collection Count": get_collection_count("chunks"),
             "Processing Time": get_processing_time("storing-chunks"),
         },
         {
             "Processing Step": "Identifying Clone Candidates",
             "Collection Count": get_collection_count("candidates"),
-            "Processing Time": get_processing_time("identifying-clone-candidates"),
+            "Processing Time": get_processing_time("identify-candidates"),
         },
         {
             "Processing Step": "Expanding Candidate (clone count)",
@@ -70,7 +70,7 @@ def get_timers_data():
 
     # Initialize session state if not already done
     if "pd_data" not in st.session_state:
-        st.session_state["pd_data"] = pd.DataFrame(columns=["timestamp", "duration"])
+        st.session_state["pd_data"] = pd.DataFrame(columns=["timestamp", "duration", "step"])
         st.session_state["last_timestamp"] = None
 
     # Build the query based on the last fetched timestamp
@@ -97,18 +97,36 @@ def get_timers_data():
         # Update last fetched timestamp to the last document's timestamp
         st.session_state["last_timestamp"] = new_df["timestamp"].iloc[-1]
 
-    # Aggregate data in batches of size BATCH_SIZE
+    # Process data for scatter plot
     data = st.session_state["pd_data"]
-    data["batch"] = data.index // BATCH_SIZE
 
-    aggregated = data.groupby("batch").agg(
-        timestamp=("timestamp", "first"),  # First timestamp in the batch
-        average_duration=("duration", "mean")  # Average duration in the batch
-    )
+    # Separate and process "chunkify-file"
+    chunkify_data = data[data["step"] == "chunkify-file"].copy()
+    if not chunkify_data.empty:
+        chunkify_data["batch"] = chunkify_data.index // BATCH_SIZE
+        aggregated_chunkify = chunkify_data.groupby("batch").agg(
+            timestamp=("timestamp", "first"),  # First timestamp in the batch
+            average_duration=("duration", "mean"),  # Average duration in the batch
+        )
+        chunkify_scatter_data = [
+            {"x": row["timestamp"], "y": row["average_duration"], "step": "chunkify-file"}
+            for _, row in aggregated_chunkify.iterrows()
+        ]
+    else:
+        chunkify_scatter_data = []
 
-    # Return data for scatter plot
-    scatter_data = [{"x": row["timestamp"], "y": row["average_duration"]} for _, row in aggregated.iterrows()]
-    return scatter_data
+    # Process "expand-single-candidate" without batching
+    expand_single_data = data[data["step"] == "expand-single-candidate"]
+    expand_scatter_data = [
+        {"x": row["timestamp"], "y": row["duration"], "step": "expand-single-candidate"}
+        for _, row in expand_single_data.iterrows()
+    ]
+
+    # Combine both datasets
+    combined_data = chunkify_scatter_data + expand_scatter_data
+
+    return combined_data
+
 
 def get_info_data():
     """Fetch summary statistics."""
